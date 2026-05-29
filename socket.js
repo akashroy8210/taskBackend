@@ -2,7 +2,9 @@ import Room from "./models/RoomModel.js"
 import activeRooms from "./store/activeRoom.js"
 const socketHandler = (io) => {
     const generateRoomPin = () => {
-        return Math.floor(100000 + Math.random() * 9000).toString()
+    return Math.floor(
+        100000 + Math.random() * 900000
+    ).toString()
     }
     io.on("connection", async (socket) => {
         console.log("User connected", socket.id)
@@ -192,14 +194,15 @@ const socketHandler = (io) => {
                         message: "Room not found"
                     })
                 }
-                room.slides = slides
-                await room.save()
                 if (activeRooms[roomPin].hostId !== socket.id) {
                     return callback({
                         success: false,
                         message: "Only host can save slides"
                     })
                 }
+                room.slides = slides
+                await room.save()
+                
                 if (activeRooms[roomPin]) {
                     activeRooms[roomPin].slides = slides
                 }
@@ -215,54 +218,100 @@ const socketHandler = (io) => {
             }
         })
 
-        socket.on('start-quiz', async (data, callback) => {
-            try {
-                const { roomPin } = data
-                const room = await Room.findOne({ roomPin })
-                if (!room) {
-                    return callback({
-                        success: false,
-                        message: "Room not found"
-                    })
-                }
-                const activeRoom = activeRooms[roomPin]
-                if (!activeRoom) {
-                    return callback({
-                        success: false,
-                        message: "ActiveRoom not found"
-                    })
-                }
-                if (slides.length === 0) {
-                    return callback({
-                        success: false,
-                        message: "no Slides found"
-                    })
-                }
-                activeRooms.currentSlideIndex = 0;
-                const firstSlide = room.slides[0]
-                activerRoom.gameState = firstSlide.type
-                room.currentSlideIndex = 0
-                room.gameState = firstSlide.type
-                room.isLive = true
-                await room.save()
-                io.to(roomPin).emit('slide-updated', {
-                    currentSlide: firstSlide,
-                    gameState: firstSlide.type
+        socket.on(
+    "start-quiz",
+    async (data, callback) => {
+
+        try {
+
+            const { roomPin } = data
+
+            const room =
+                await Room.findOne({
+                    roomPin
                 })
-                callback({
-                    success: true
-                });
-            } catch (err) {
 
-                console.log(err);
+            if (!room) {
+                return callback({
+                    success: false,
+                    message: "Room not found"
+                })
+            }
 
-                callback({
+            const activeRoom =
+                activeRooms[roomPin]
+
+            if (!activeRoom) {
+                return callback({
                     success: false,
                     message:
-                        "Failed to start quiz"
-                });
+                        "Active room not found"
+                })
             }
-        })
+
+            if (
+                room.slides.length === 0
+            ) {
+                return callback({
+                    success: false,
+                    message:
+                        "No slides found"
+                })
+            }
+
+            activeRoom.currentSlideIndex = 0
+
+            const firstSlide =
+                room.slides[0]
+
+            let gameState =
+                firstSlide.type
+
+            if (
+                firstSlide.type ===
+                "INFO"
+            ) {
+                gameState = "SLIDE"
+            }
+
+            activeRoom.gameState =
+                gameState
+
+            room.currentSlideIndex = 0
+
+            room.gameState =
+                gameState
+
+            room.isLive = true
+
+            await room.save()
+
+            io.to(roomPin).emit(
+                "slide-update",
+                {
+                    currentSlide:
+                        firstSlide,
+
+                    gameState
+                }
+            )
+
+            callback({
+                success: true
+            })
+
+        } catch (err) {
+
+            console.log(err)
+
+            callback({
+                success: false,
+                message:
+                    "Failed to start quiz"
+            })
+        }
+    }
+)
 
         socket.on('change-state', async (data) => {
             try {
@@ -363,6 +412,13 @@ const socketHandler = (io) => {
                                 "leaderboard-update",
                                 leaderboard
                             )
+                            io.to(roomPin).emit(
+    "state-update",
+    {
+        gameState:
+            "LEADERBOARD"
+    }
+)
                         }
 
                     }, 1000)
@@ -426,6 +482,14 @@ const socketHandler = (io) => {
                 //     })
                 // }
 
+                const participant = room.participants.find((user) => user.socketId === socket.id)
+                participant.selectedAnswer = selectedAnswer
+
+                participant.hasAnswered = true
+
+                if (!participant) {
+                    return
+                }
                 const isCorrect =
                     currentSlide.correctAnswer === selectedAnswer
                 room.answers[socket.id] = {
@@ -435,14 +499,7 @@ const socketHandler = (io) => {
                     isCorrect
                 }
 
-                const participant = room.participants.find((user) => user.socketId === socket.id)
-                participant.selectedAnswer = selectedAnswer
-
-                participant.hasAnswered = true
-
-                if (!participant) {
-                    return
-                }
+                
                 let score = 0
                 if (isCorrect) {
                     score =
@@ -483,9 +540,11 @@ const socketHandler = (io) => {
                     }
                 )
                 io.to(roomPin).emit(
-                    "answers-update",
-                    room.answers
-                )
+    "answers-update",
+    Object.values(
+        room.answers
+    )
+)
                 io.to(roomPin).emit(
                     "leaderboard-update",
                     room.participants
@@ -541,14 +600,7 @@ const socketHandler = (io) => {
                 }
 
                 activeRooms[roomPin].participants = activeRooms[roomPin].participants.filter(user => user.socketId !== socket.id)
-                const room = await Room.findOne({ roomPin })
-                if (room) {
-                    room.participants =
-                        room.participants.filter(
-                            (user) => user.socketId !== socket.id
-                        )
-                    await room.save()
-                }
+                
 
                 io.to(roomPin).emit("participants-updated", activeRooms[roomPin].participants)
 
